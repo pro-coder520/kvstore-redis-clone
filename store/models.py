@@ -3,7 +3,7 @@ from django.utils import timezone
 
 
 class KeyValue(models.Model):
-    key = models.UUIDField(max_length=255, db_index=True, unique=True)
+    key = models.CharField(max_length=255, db_index=True, unique=True)
     value = models.JSONField()
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField(db_index=True, null=True, blank=True)

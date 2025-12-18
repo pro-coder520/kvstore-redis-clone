@@ -34,6 +34,12 @@ class KVStore(View):
         except KeyValue.DoesNotExist:
             return JsonResponse({"error": "Key could not be found"}, status=404)
     
+    def post (self, request, key):
+        """
+        POST /<key>
+        
+        """
+
     def _get_ttl(self, item):
         """Helper to fetch remaining seconds"""
         if not item.expires_at():

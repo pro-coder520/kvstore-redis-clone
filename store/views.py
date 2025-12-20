@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import timedelta
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.utils import timezone
@@ -37,8 +38,43 @@ class KVStore(View):
     def post (self, request, key):
         """
         POST /<key>
-        
+        Body: {"value": <any>, "ttl": <seconds (int, optional)>}
+        Sets the value. Overwrites key if it exists.
         """
+        try:
+            data = json.loads(request.body)
+            value = data.get('value')
+            ttl_seconds = data.get('ttl', None)
+
+            if value is None:
+                return JsonResponse({"error": "Missing value in payload"}, status=400)
+            
+            # Calculate expiry date of key
+            expires_at = None
+            if ttl_seconds:
+                expires_at = timezone.now() + timedelta(seconds=int(ttl_seconds))
+            
+            # Handles race conditions at the database level
+            obj, created = KeyValue.objects.update_or_create(
+                key=key,
+                defaults={
+                    "value": value,
+                    "expires_at": expires_at,
+                }
+            )
+
+            action = "created" if created else "updated"
+            return JsonResponse({
+                "status": "ok",
+                "action": action,
+                "key": key,
+                "expires_at": expires_at,
+            }, status=201)
+        except json.JSONDecodeError:
+            return JsonResponse({"error": "Invalid JSON"}, status=400)
+        except Exception as e:
+            logger.error(f"Error setting key '{key}': {str(e)}")
+            return JsonResponse({"error": "Internal Server Error"}, status=500)
 
     def _get_ttl(self, item):
         """Helper to fetch remaining seconds"""

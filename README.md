@@ -1,128 +1,227 @@
-Django HTTP Key-Value Store (Redis Clone)
-A lightweight, high-performance Key-Value store built with Django. This project mimics the core functionality of Redis—allowing you to store, retrieve, and expire data—but uses HTTP requests instead of the RESP protocol, making it universally accessible via any REST client.
+# ⚡ Django-Redis: HTTP Key-Value Store
 
- Features
-JSON-First: Store strings, integers, lists, or complex dictionaries natively using Django's JSONField.
+![Python](https://img.shields.io/badge/Python-3.8%2B-blue?style=for-the-badge&logo=python&logoColor=white)
+![Django](https://img.shields.io/badge/Django-4.0%2B-092E20?style=for-the-badge&logo=django&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)
+![Status](https://img.shields.io/badge/Status-MVP-orange?style=for-the-badge)
 
-Time-To-Live (TTL): Supports setting expiration times (in seconds) for any key.
+A lightweight, high-performance **Key-Value Store** built entirely on the **Django** framework.
 
-Lazy Expiration: Automatically checks and removes expired keys when they are accessed.
+This project re-imagines Redis as a **RESTful web service**. It provides atomic `SET` and `GET` operations, supports complex `JSON` data types natively, and implements a robust **expiration engine** (TTL) that works both lazily (on-access) and actively (via a background scheduler).
 
-Active Cleanup: Includes a custom background scheduler (run_scheduler.py) to physically purge stale data from the database every minute.
+---
 
-Atomic Operations: Uses database locking (update_or_create) to handle race conditions during concurrent writes.
+## 📑 Table of Contents
 
- Installation & Setup
-1. Prerequisites
-Python 3.8+
+- [About the Project](#-about-the-project)
+- [Key Features](#-key-features)
+- [Architecture](#-architecture)
+- [Getting Started](#-getting-started)
+- [Usage Guide](#-usage-guide)
+- [Background Scheduler](#-background-scheduler)
+- [Project Structure](#-project-structure)
+- [Roadmap](#-roadmap)
+- [License](#-license)
 
-Django 4.0+
+---
 
-2. Setup
-Clone the repository and install the dependencies (Django):
+## 🧐 About the Project
 
-Bash
+I built this project to demonstrate that Django can be used for more than just standard CRUD apps. By leveraging Django's **ORM** for atomic locking (`update_or_create`) and `JSONField` for flexible storage, we created a **thread-safe state store** that can be accessed by any HTTP client.
 
-pip install django
-3. Database Initialization
-Initialize the SQLite database (or Postgres if configured):
+It is designed to be a **"State Microservice"** for distributed systems that need to share configuration or session data without setting up a full Redis instance.
 
-Bash
+---
 
-python manage.py makemigrations
-python manage.py migrate
-4. Run the Server
-Start the main API server on port 8000:
+## ✨ Key Features
 
-Bash
+* ✅ **JSON-First Storage:** Store `strings`, `lists`, `integers`, or nested `dictionaries` natively.
+* ✅ **Time-To-Live (TTL):** Set keys to auto-expire after `N` seconds.
+* ✅ **Lazy Expiration:** Expired keys are instantly detected and removed during `GET` requests.
+* ✅ **Active Cleanup:** A standalone background worker purges stale data to keep the DB lean.
+* ✅ **Atomic Writes:** Handles race conditions safely using database-level locking strategies.
 
-python manage.py runserver 8000
- API Documentation
-The store exposes a simple REST interface. You can use curl, Postman, or any HTTP client.
+---
 
-1. SET a Key
-Create or update a key. You can optionally provide a ttl (Time-To-Live) in seconds.
+## 🏗 Architecture
 
-Endpoint: POST /<key>/
+The system uses a **Hybrid Expiration Strategy**:
 
-Headers: Content-Type: application/json
+1. **Lazy Deletion (Passive):**  
+   When a client requests a key via `GET`, the server checks `if now > expires_at`. If true, it deletes the key immediately and returns `404 Not Found`.
 
-Example: Store User Data (No Expiry)
+2. **Active Deletion (Active):**  
+   A background script (`run_scheduler.py`) runs every **60 seconds** to bulk-delete keys that haven't been accessed recently but are past their expiry.
 
-Bash
+---
 
-curl -X POST http://127.0.0.1:8000/user:101/ \
+## 🚀 Getting Started
+
+### Prerequisites
+
+* **Python 3.8+**
+* `pip` (Python Package Manager)
+
+### Installation
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/yourusername/django-redis-clone.git
+   cd django-redis-clone
+   ```
+
+2. **Install dependencies**
+   ```bash
+   pip install django
+   ```
+
+3. **Initialize the Database**
+   ```bash
+   python manage.py makemigrations
+   python manage.py migrate
+   ```
+
+4. **Start the Server**
+   ```bash
+   python manage.py runserver 8000
+   ```
+
+---
+
+## 🔌 Usage Guide
+
+The API accepts and returns `application/json`. You can use `curl`, **Postman**, or any HTTP client.
+
+### 1. SET a Value
+
+Create or update a key.
+
+#### Example A: Standard Storage (No Expiry)
+
+**Request:**
+```bash
+curl -X POST http://127.0.0.1:8000/user-config/ \
      -H "Content-Type: application/json" \
-     -d '{"value": {"name": "Emeka", "role": "Engineer", "skills": ["Python", "Django"]}}'
-Example: Store an OTP (Expires in 60 seconds)
+     -d '{
+           "value": {"theme": "dark", "notifications": true}
+         }'
+```
 
-Bash
-
-curl -X POST http://127.0.0.1:8000/otp:555/ \
-     -H "Content-Type: application/json" \
-     -d '{"value": 849201, "ttl": 60}'
-2. GET a Key
-Retrieve a value. If the key has expired, it will return a 404 and delete the record.
-
-Endpoint: GET /<key>/
-
-Example:
-
-Bash
-
-curl http://127.0.0.1:8000/user:101/
-Response (Success):
-
-JSON
-
+**Response:**
+```json
 {
-    "key": "user:101",
-    "value": {"name": "Emeka", "role": "Engineer", "skills": ["Python", "Django"]},
+    "status": "ok",
+    "action": "created",
+    "key": "user-config",
+    "expires_at": null
+}
+```
+
+#### Example B: Storage with TTL (Expires in 60s)
+
+**Request:**
+```bash
+curl -X POST http://127.0.0.1:8000/otp-code/ \
+     -H "Content-Type: application/json" \
+     -d '{
+           "value": 49201, 
+           "ttl": 60
+         }'
+```
+
+**Response:**
+```json
+{
+    "status": "ok",
+    "action": "created",
+    "key": "otp-code",
+    "expires_at": "2025-12-20T21:31:00Z"
+}
+```
+
+### 2. GET a Value
+
+Retrieve a key.
+
+**Request:**
+```bash
+curl http://127.0.0.1:8000/user-config/
+```
+
+**Response (Success):**
+```json
+{
+    "key": "user-config",
+    "value": {"theme": "dark", "notifications": true},
     "ttl_remaining": -1
 }
-Response (Expired/Missing):
+```
 
-JSON
-
+**Response (Expired or Missing):**
+```json
 {
     "error": "Key not found (expired)"
 }
- Background Scheduler (Windows Compatible)
-To prevent the database from filling up with expired keys that are never accessed (and thus never triggered for "Lazy Expiration"), this project includes a standalone scheduler.
+```
 
-How it works
-The run_scheduler.py script runs in a loop, triggering the Django management command cleanup_keys every 60 seconds.
+---
 
-How to Run
-Open a separate terminal window (keep your runserver running in the first one) and execute:
+## 🕰 Background Scheduler
 
-Bash
+To prevent the database from growing infinitely with stale data, run the included scheduler. This script works on Windows, Linux, and macOS.
 
+**Run in a separate terminal window:**
+```bash
 python run_scheduler.py
-Output:
+```
 
-Plaintext
-
+**Output:**
+```
 ---------------------------------------------------
 Scheduler Started. Running 'cleanup_keys' every 60s.
-Press Ctrl+C to stop.
 ---------------------------------------------------
-[14:05:01] Running cleanup...
-Successfully deleted 12 expired keys
-[14:06:01] Running cleanup...
- Project Structure
-Bash
+Running cleanup... Successfully deleted 5 expired keys.
+```
 
+---
+
+## 📂 Project Structure
+
+```
 redis_clone/
-├── db.sqlite3           # The database (persisted storage)
+├── db.sqlite3           # The persisted database
 ├── manage.py            # Django entry point
-├── run_scheduler.py     # The background task runner
-├── redis_clone/         # Project settings
+├── run_scheduler.py     # Background task runner (Custom Script)
+├── redis_clone/         # Project Settings
 │   ├── settings.py
 │   └── urls.py
-└── store/               # The Main App
+└── store/               # Main Application
     ├── models.py        # KeyValue model definition
     ├── views.py         # API logic (GET/POST)
     └── management/
         └── commands/
-            └── cleanup_keys.py # Custom command for the scheduler
+            └── cleanup_keys.py # The cleanup logic
+```
+
+---
+
+## 🗺 Roadmap
+
+- [x] Basic SET/GET operations
+- [x] Lazy Expiration logic
+- [x] Background Cleanup Scheduler
+- [ ] Add Authentication (API Key middleware)
+- [ ] Add INCR and DECR atomic operations for counters
+- [ ] Dockerize the application with docker-compose
+
+---
+
+## 📄 License
+
+Distributed under the MIT License. See LICENSE for more information.
+
+---
+
+## 👤 Author
+
+Built with ❤️ by Iremide Joseph Adeyanju.
